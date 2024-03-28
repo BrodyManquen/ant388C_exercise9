@@ -1,0 +1,196 @@
+---
+title: "Exercise 9"
+format: html
+---
+
+```{r}
+library(tidyverse)
+library(skimr)
+library(broom)
+library(infer)
+```
+
+## Step 1
+
+```{r}
+f <- "https://raw.githubusercontent.com/difiore/ada-2024-datasets/main/Street_et_al_2017.csv"
+d <- read_csv(f, col_names=TRUE)
+```
+
+```{r}
+my_skim <- skim_with(numeric = sfl(median = median, min = min, max = max))
+my_skim(d)
+```
+
+## Step 2
+
+```{r}
+par(mfrow=c(1,4))
+p1 <- d %>% ggplot()+geom_point(aes(x=Group_size, y=ECV))+xlab("Group Size")+ylab("ECV")
+p2 <- d %>% ggplot()+geom_point(aes(x=Longevity, y=ECV))+xlab("Longevity")+ylab("ECV")
+p3 <- d %>% ggplot()+geom_point(aes(x=Weaning, y=ECV))+xlab("Weaning")+ylab("ECV")
+p4 <- d %>% ggplot()+geom_point(aes(x=Repro_lifespan, y=ECV))+xlab("Reproductive Lifespan")+ylab("ECV")
+```
+
+```{r}
+p1
+```
+```{r}
+p2
+```
+```{r}
+p3
+```
+```{r}
+p4
+```
+
+## Step 3
+
+B1:
+```{r}
+d <- d %>% drop_na() # remove NA
+b1 <- cov(d$Group_size,d$ECV)/var(d$Group_size)
+b1
+```
+B0:
+```{r}
+b0 <- mean(d$ECV) - b1 * mean(d$Group_size)
+b0
+```
+
+## Step 4
+
+```{r}
+m1 <- lm(ECV~Group_size, data=d)
+m1$coefficients
+```
+
+## Step 5
+
+```{r}
+m2 <- d %>% group_by(Taxonomic_group) %>% do(model=lm(ECV~Group_size, data=.))
+m2$model
+```
+
+The regression coefficients seem to differ among groups. But is it statistically significant?
+
+## Step 6
+
+### Standard Error
+
+```{r}
+#se of b1
+SSE <- sum(m1$residuals^2)
+df_error <- nrow(d) - 2
+MSE <- SSE/df_error
+SSX <- sum((m1$model$Group_size - mean(m1$model$Group_size))^2)
+
+SEbeta1 <- sqrt(MSE/SSX)
+SEbeta1
+```
+
+Check against tidy():
+```{r}
+tidy(m1)$std.error[2]
+```
+
+### CI
+
+```{r}
+m1.summary <- tidy(m1)
+lower <- m1.summary$estimate - qt(1 - alpha/2, df = nrow(d) - 2) * m1.summary$std.error
+upper <- m1.summary$estimate + qt(1 - alpha/2, df = nrow(d) - 2) * m1.summary$std.error
+CI <- cbind(lower, upper)
+CI
+```
+
+### p-value
+
+```{r}
+m1.summary$calc.statistic <- (m1.summary$estimate - 0)/m1.summary$std.error
+m1.summary$calc.p.value <- 2 * pt(m1.summary$calc.statistic, df = nrow(d) - 2, lower.tail = FALSE)
+m1.summary$calc.p.value
+```
+
+## Step 7
+
+```{r}
+alpha <- 0.05
+confidence_level <- 1 - alpha
+p_lower <- alpha/2
+p_upper <- 1 - (alpha/2)
+degrees_of_freedom <- nrow(d) - 2
+critical_value <- qt(p_upper, df = degrees_of_freedom)
+
+# original slope
+original.slope <- lm(data = d, ECV ~ Group_size) %>%
+tidy(conf.int = TRUE, conf.level = confidence_level) %>%
+mutate(lower = estimate - std.error * critical_value, upper = estimate + std.error *
+    critical_value) %>%
+    filter(term == "Group_size")
+original.slope  # show model results for slope of weight
+```
+
+```{r}
+permuted.slope <- d %>%
+  specify(ECV ~ Group_size) %>%
+  hypothesize(null = "independence") %>%
+  generate(reps = 1000, type = "permute") %>%
+  calculate(stat = "slope")
+
+permuted.slope.summary <- permuted.slope %>%
+  summarize(
+    estimate = mean(stat), # should be very close to ZERO
+    std.error = sd(stat),
+    lower = estimate - std.error * critical_value,
+    upper = estimate + std.error * critical_value,
+    perm.lower = quantile(stat, p_lower),
+    perm.upper = quantile(stat, p_upper)
+  )
+
+# show summary of permuted sampling distribution
+permuted.slope.summary
+```
+
+## Step 8
+
+```{r}
+boot.slope <- d %>%
+  # specify model
+  specify(ECV ~ Group_size) %>%
+  # generate bootstrap replicates
+  generate(reps = 1000, type = "bootstrap") %>%
+  # calculate the slope statistic
+  calculate(stat = "slope")
+
+boot.slope.summary <- boot.slope %>%
+  # summarize the mean, t distribution based CI, and quantile-based CI
+  summarize(
+    # mean of stat
+    estimate = mean(stat),
+    # std error of stat
+    std.error = sd(stat),
+    # calculate the CI based on the SE and t distribution
+    lower = estimate - std.error * critical_value,
+    upper = estimate + std.error * critical_value,
+    # calculate the CI based on the quantile (percentile)  method
+    boot.lower = quantile(stat, p_lower),
+    boot.upper = quantile(stat, p_upper)
+  )
+
+# show summary of bootstrap sampling distribution
+boot.slope.summary
+```
+
+```{r}
+CI.percentile <- get_ci(boot.slope, level = 1 - alpha, type = "percentile")
+CI.percentile
+```
+
+```{r}
+CI.theory <- get_ci(boot.slope, level = 1 - alpha, type = "se", point_estimate = pull(boot.slope.summary,
+    estimate))
+CI.theory
+```
+These results suggest that the slope coefficient is greater than zero because zero is not included in the 95% percentile boundaries.
