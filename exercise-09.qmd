@@ -99,6 +99,7 @@ tidy(m1)$std.error[2]
 
 ```{r}
 m1.summary <- tidy(m1)
+alpha<-0.05
 lower <- m1.summary$estimate - qt(1 - alpha/2, df = nrow(d) - 2) * m1.summary$std.error
 upper <- m1.summary$estimate + qt(1 - alpha/2, df = nrow(d) - 2) * m1.summary$std.error
 CI <- cbind(lower, upper)
